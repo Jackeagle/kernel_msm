@@ -546,6 +546,13 @@ enum ufshcd_quirks {
 	 */
 	UFSHCI_QUIRK_SKIP_MANUAL_WB_FLUSH_CTRL		= 1 << 12,
 
+	/*
+	 * This quirk needs to be enabled if the host controller supports inline
+	 * encryption, but it doesn't use the standard crypto capability
+	 * registers.  If enabled, the standard code won't initialize the
+	 * keyslot manager; ufs_hba_variant_ops::init() must do it instead.
+	 */
+	UFSHCD_QUIRK_BROKEN_CRYPTO_CAPS			= 1 << 20,
 };
 
 enum ufshcd_caps {
