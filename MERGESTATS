@@ -1,0 +1,10 @@
+
+Branch origin/chromeos-5.10-base:
+git describe before merge: v5.10-rc1
+git describe after merge: v5.10-rc1-3-g4312def885bc
+Changes against baseline (wc):       3      27     243
+
+Branch origin/chromeos-5.10-android:
+git describe before merge: v5.10-rc1-3-g4312def885bc
+git describe after merge: v5.10-rc1-160-g518d82822d0c
+Changes against baseline (wc):     160    1396   11328
