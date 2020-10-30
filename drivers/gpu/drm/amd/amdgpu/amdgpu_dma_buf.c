@@ -429,8 +429,8 @@ int amdgpu_try_dma_buf_mmap(struct file *filp, struct vm_area_struct *vma)
        if (drm_dev_is_unplugged(dev))
                return -ENODEV;
 
-       drm_vma_offset_lock_lookup(&bdev->vma_manager);
-       node = drm_vma_offset_exact_lookup_locked(&bdev->vma_manager,
+       drm_vma_offset_lock_lookup(bdev->vma_manager);
+       node = drm_vma_offset_exact_lookup_locked(bdev->vma_manager,
                                                  vma->vm_pgoff,
                                                  vma_pages(vma));
 
@@ -438,7 +438,7 @@ int amdgpu_try_dma_buf_mmap(struct file *filp, struct vm_area_struct *vma)
                tbo = container_of(node, struct ttm_buffer_object, base.vma_node);
                tbo = ttm_bo_get_unless_zero(tbo);
        }
-       drm_vma_offset_unlock_lookup(&bdev->vma_manager);
+       drm_vma_offset_unlock_lookup(bdev->vma_manager);
 
        if (!tbo)
                return -EINVAL;
