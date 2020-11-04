@@ -256,31 +256,33 @@ static int venc_s_fmt(struct file *file, void *fh, struct v4l2_format *f)
 
 	memset(&format, 0, sizeof(format));
 
-	format.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
-	format.fmt.pix_mp.pixelformat = pixfmt_out;
-	format.fmt.pix_mp.width = orig_pixmp.width;
-	format.fmt.pix_mp.height = orig_pixmp.height;
-	venc_try_fmt_common(inst, &format);
-
-	if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
-		inst->out_width = format.fmt.pix_mp.width;
-		inst->out_height = format.fmt.pix_mp.height;
-		inst->colorspace = pixmp->colorspace;
-		inst->ycbcr_enc = pixmp->ycbcr_enc;
-		inst->quantization = pixmp->quantization;
-		inst->xfer_func = pixmp->xfer_func;
-	}
-
-	memset(&format, 0, sizeof(format));
-
 	format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 	format.fmt.pix_mp.pixelformat = pixfmt_cap;
 	format.fmt.pix_mp.width = orig_pixmp.width;
 	format.fmt.pix_mp.height = orig_pixmp.height;
 	venc_try_fmt_common(inst, &format);
 
-	inst->width = format.fmt.pix_mp.width;
-	inst->height = format.fmt.pix_mp.height;
+	if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
+		inst->width = format.fmt.pix_mp.width;
+		inst->height = format.fmt.pix_mp.height;
+	}
+
+	memset(&format, 0, sizeof(format));
+
+	format.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+	format.fmt.pix_mp.pixelformat = pixfmt_out;
+	format.fmt.pix_mp.width = orig_pixmp.width;
+	format.fmt.pix_mp.height = orig_pixmp.height;
+	venc_try_fmt_common(inst, &format);
+
+	inst->out_width = format.fmt.pix_mp.width;
+	inst->out_height = format.fmt.pix_mp.height;
+	if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+		inst->colorspace = pixmp->colorspace;
+		inst->ycbcr_enc = pixmp->ycbcr_enc;
+		inst->quantization = pixmp->quantization;
+		inst->xfer_func = pixmp->xfer_func;
+	}
 
 	if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
 		inst->fmt_out = fmt;
@@ -335,12 +337,12 @@ venc_g_selection(struct file *file, void *fh, struct v4l2_selection *s)
 	switch (s->target) {
 	case V4L2_SEL_TGT_CROP_DEFAULT:
 	case V4L2_SEL_TGT_CROP_BOUNDS:
-		s->r.width = inst->width;
-		s->r.height = inst->height;
-		break;
-	case V4L2_SEL_TGT_CROP:
 		s->r.width = inst->out_width;
 		s->r.height = inst->out_height;
+		break;
+	case V4L2_SEL_TGT_CROP:
+		s->r.width = inst->width;
+		s->r.height = inst->height;
 		break;
 	default:
 		return -EINVAL;
@@ -362,10 +364,14 @@ venc_s_selection(struct file *file, void *fh, struct v4l2_selection *s)
 
 	switch (s->target) {
 	case V4L2_SEL_TGT_CROP:
-		if (s->r.width != inst->out_width ||
-		    s->r.height != inst->out_height ||
-		    s->r.top != 0 || s->r.left != 0)
-			return -EINVAL;
+		if (s->r.width != inst->width ||
+		    s->r.height != inst->height ||
+		    s->r.top != 0 || s->r.left != 0) {
+			s->r.top = 0;
+			s->r.left = 0;
+			s->r.width = inst->width;
+			s->r.height = inst->height;
+		}
 		break;
 	default:
 		return -EINVAL;
@@ -498,6 +504,46 @@ static int venc_enum_frameintervals(struct file *file, void *fh,
 	return 0;
 }
 
+static int
+venc_encoder_cmd(struct file *file, void *fh, struct v4l2_encoder_cmd *cmd)
+{
+	struct venus_inst *inst = to_inst(file);
+	struct hfi_frame_data fdata = {0};
+	int ret = 0;
+
+	ret = v4l2_m2m_ioctl_try_encoder_cmd(file, fh, cmd);
+	if (ret)
+		return ret;
+
+	mutex_lock(&inst->lock);
+
+	if (cmd->cmd == V4L2_ENC_CMD_STOP &&
+	    inst->enc_state == VENUS_ENC_STATE_ENCODING) {
+		/*
+		 * Implement V4L2_ENC_CMD_STOP by enqueue an empty buffer on
+		 * encoder input to signal EOS.
+		 */
+		if (!(inst->streamon_out && inst->streamon_cap))
+			goto unlock;
+
+		fdata.buffer_type = HFI_BUFFER_INPUT;
+		fdata.flags |= HFI_BUFFERFLAG_EOS;
+		fdata.device_addr = 0xdeadb000;
+
+		ret = hfi_session_process_buf(inst, &fdata);
+
+		inst->enc_state = VENUS_ENC_STATE_DRAIN;
+	} else if (cmd->cmd == V4L2_ENC_CMD_START &&
+		inst->enc_state == VENUS_ENC_STATE_STOPPED) {
+		vb2_clear_last_buffer_dequeued(&inst->fh.m2m_ctx->cap_q_ctx.q);
+		inst->enc_state = VENUS_ENC_STATE_ENCODING;
+	}
+
+unlock:
+	mutex_unlock(&inst->lock);
+	return ret;
+}
+
 static const struct v4l2_ioctl_ops venc_ioctl_ops = {
 	.vidioc_querycap = venc_querycap,
 	.vidioc_enum_fmt_vid_cap = venc_enum_fmt,
@@ -525,6 +571,7 @@ static const struct v4l2_ioctl_ops venc_ioctl_ops = {
 	.vidioc_enum_frameintervals = venc_enum_frameintervals,
 	.vidioc_subscribe_event = v4l2_ctrl_subscribe_event,
 	.vidioc_unsubscribe_event = v4l2_event_unsubscribe,
+	.vidioc_encoder_cmd = venc_encoder_cmd,
 };
 
 static int venc_set_properties(struct venus_inst *inst)
@@ -884,6 +931,8 @@ static int venc_start_streaming(struct vb2_queue *q, unsigned int count)
 	if (ret)
 		goto deinit_sess;
 
+	inst->enc_state = VENUS_ENC_STATE_ENCODING;
+
 	mutex_unlock(&inst->lock);
 
 	return 0;
@@ -900,13 +949,33 @@ bufs_done:
 	return ret;
 }
 
+static void venc_vb2_buf_queue(struct vb2_buffer *vb)
+{
+	struct venus_inst *inst = vb2_get_drv_priv(vb->vb2_queue);
+	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
+
+	mutex_lock(&inst->lock);
+
+	if (inst->enc_state == VENUS_ENC_STATE_STOPPED) {
+		vbuf->sequence = inst->sequence_cap++;
+		vbuf->field = V4L2_FIELD_NONE;
+		vb2_set_plane_payload(vb, 0, 0);
+		v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+		mutex_unlock(&inst->lock);
+		return;
+	}
+
+	venus_helper_vb2_buf_queue(vb);
+	mutex_unlock(&inst->lock);
+}
+
 static const struct vb2_ops venc_vb2_ops = {
 	.queue_setup = venc_queue_setup,
 	.buf_init = venus_helper_vb2_buf_init,
 	.buf_prepare = venus_helper_vb2_buf_prepare,
 	.start_streaming = venc_start_streaming,
 	.stop_streaming = venus_helper_vb2_stop_streaming,
-	.buf_queue = venus_helper_vb2_buf_queue,
+	.buf_queue = venc_vb2_buf_queue,
 };
 
 static void venc_buf_done(struct venus_inst *inst, unsigned int buf_type,
@@ -934,6 +1003,11 @@ static void venc_buf_done(struct venus_inst *inst, unsigned int buf_type,
 		vb->planes[0].data_offset = data_offset;
 		vb->timestamp = timestamp_us * NSEC_PER_USEC;
 		vbuf->sequence = inst->sequence_cap++;
+
+		if ((vbuf->flags & V4L2_BUF_FLAG_LAST) &&
+		    inst->enc_state == VENUS_ENC_STATE_DRAIN) {
+			inst->enc_state = VENUS_ENC_STATE_STOPPED;
+		}
 	} else {
 		vbuf->sequence = inst->sequence_out++;
 	}
@@ -1032,6 +1106,9 @@ static int venc_open(struct file *file)
 	inst->clk_data.core_id = VIDC_CORE_ID_DEFAULT;
 	inst->core_acquired = false;
 
+	if (inst->enc_state == VENUS_ENC_STATE_DEINIT)
+		inst->enc_state = VENUS_ENC_STATE_INIT;
+
 	venus_helper_init_instance(inst);
 
 	ret = pm_runtime_get_sync(core->dev_enc);
@@ -1096,7 +1173,7 @@ static int venc_close(struct file *file)
 	mutex_destroy(&inst->lock);
 	v4l2_fh_del(&inst->fh);
 	v4l2_fh_exit(&inst->fh);
-
+	inst->enc_state = VENUS_ENC_STATE_DEINIT;
 	pm_runtime_put_sync(inst->core->dev_enc);
 
 	kfree(inst);
