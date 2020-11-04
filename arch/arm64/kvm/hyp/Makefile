@@ -10,4 +10,8 @@ subdir-ccflags-y := -I$(incdir)				\
 		    -DDISABLE_BRANCH_PROFILING		\
 		    $(DISABLE_STACKLEAK_PLUGIN)
 
+ifeq ($(cc-name),clang)
+subdir-ccflags-y += -fno-jump-tables
+endif
+
 obj-$(CONFIG_KVM) += vhe/ nvhe/ pgtable.o smccc_wa.o
