@@ -1404,6 +1404,7 @@ static const struct panel_desc boe_nv101wxmn51 = {
 static const struct drm_display_mode boe_nv110wtm_n61_modes[] = {
 	{
 		.clock = 207800,
+		.flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_NVSYNC,
 		.hdisplay = 2160,
 		.hsync_start = 2160 + 48,
 		.hsync_end = 2160 + 48 + 32,
@@ -1415,6 +1416,7 @@ static const struct drm_display_mode boe_nv110wtm_n61_modes[] = {
 	},
 	{
 		.clock = 138500,
+		.flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_NVSYNC,
 		.hdisplay = 2160,
 		.hsync_start = 2160 + 48,
 		.hsync_end = 2160 + 48 + 32,
