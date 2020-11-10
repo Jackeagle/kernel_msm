@@ -53,6 +53,7 @@
 #include <drm/amdgpu_drm.h>
 
 #include "amdgpu.h"
+#include "amdgpu_dma_buf.h"
 #include "amdgpu_object.h"
 #include "amdgpu_trace.h"
 #include "amdgpu_amdkfd.h"
@@ -2099,6 +2100,9 @@ int amdgpu_mmap(struct file *filp, struct vm_area_struct *vma)
 
 	if (adev == NULL)
 		return -EINVAL;
+
+	if (0 == amdgpu_try_dma_buf_mmap(filp, vma))
+		return 0;
 
 	return ttm_bo_mmap(filp, vma, &adev->mman.bdev);
 }
