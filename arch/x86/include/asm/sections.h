@@ -14,8 +14,6 @@ extern char __end_rodata_aligned[];
 extern char __end_rodata_hpage_align[];
 #endif
 
-extern char __end_of_kernel_reserve[];
-
 extern unsigned long _brk_start, _brk_end;
 
 static inline bool arch_is_kernel_initmem_freed(unsigned long addr)
