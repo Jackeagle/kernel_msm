@@ -269,14 +269,24 @@ static void * __init get_boot_config_from_initrd(u32 *_size, u32 *_csum)
 	u32 size, csum;
 	char *data;
 	u32 *hdr;
+	int i;
 
 	if (!initrd_end)
 		return NULL;
 
 	data = (char *)initrd_end - BOOTCONFIG_MAGIC_LEN;
-	if (memcmp(data, BOOTCONFIG_MAGIC, BOOTCONFIG_MAGIC_LEN))
-		return NULL;
+	/*
+	 * Since Grub may align the size of initrd to 4, we must
+	 * check the preceding 3 bytes as well.
+	 */
+	for (i = 0; i < 4; i++) {
+		if (!memcmp(data, BOOTCONFIG_MAGIC, BOOTCONFIG_MAGIC_LEN))
+			goto found;
+		data--;
+	}
+	return NULL;
 
+found:
 	hdr = (u32 *)(data - 8);
 	size = hdr[0];
 	csum = hdr[1];
@@ -1470,8 +1480,14 @@ void __init console_on_rootfs(void)
 	struct file *file = filp_open("/dev/console", O_RDWR, 0);
 
 	if (IS_ERR(file)) {
-		pr_err("Warning: unable to open an initial console.\n");
-		return;
+		pr_err("Warning: unable to open an initial console. Fallback to ttynull.\n");
+		register_ttynull_console();
+
+		file = filp_open("/dev/console", O_RDWR, 0);
+		if (IS_ERR(file)) {
+			pr_err("Warning: Failed to add ttynull console. No stdin, stdout, and stderr for the init process!\n");
+			return;
+		}
 	}
 	init_dup(file);
 	init_dup(file);
