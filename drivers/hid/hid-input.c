@@ -537,9 +537,12 @@ static void hidinput_update_battery(struct hid_device *dev, int value)
 	capacity = hidinput_scale_battery_capacity(dev, value);
 
 	if (dev->battery_status != HID_BATTERY_REPORTED ||
-	    capacity != dev->battery_capacity) {
+	    capacity != dev->battery_capacity ||
+	    ktime_after(ktime_get_coarse(), dev->battery_ratelimit_time)) {
 		dev->battery_capacity = capacity;
 		dev->battery_status = HID_BATTERY_REPORTED;
+		dev->battery_ratelimit_time =
+			ktime_add_ms(ktime_get_coarse(), 30 * 1000);
 		power_supply_changed(dev->battery);
 	}
 }
@@ -771,7 +774,8 @@ static void hidinput_configure_usage(struct hid_input *hidinput, struct hid_fiel
 		break;
 
 	case HID_UP_DIGITIZER:
-		if ((field->application & 0xff) == 0x01) /* Digitizer */
+		if (((field->application & 0xff) == 0x01) ||
+			(device->quirks & HID_QUIRK_DEVICE_IS_DIGITIZER)) /* Digitizer */
 			__set_bit(INPUT_PROP_POINTER, input->propbit);
 		else if ((field->application & 0xff) == 0x02) /* Pen */
 			__set_bit(INPUT_PROP_DIRECT, input->propbit);
@@ -1552,14 +1556,32 @@ static int hidinput_open(struct input_dev *dev)
 {
 	struct hid_device *hid = input_get_drvdata(dev);
 
-	return hid_hw_open(hid);
+	return !dev->inhibited ? hid_hw_open(hid) : 0;
 }
 
 static void hidinput_close(struct input_dev *dev)
 {
 	struct hid_device *hid = input_get_drvdata(dev);
 
-	hid_hw_close(hid);
+	if (!dev->inhibited)
+		hid_hw_close(hid);
+}
+
+static int hidinput_inhibit(struct input_dev *dev)
+{
+	struct hid_device *hid = input_get_drvdata(dev);
+
+	if (dev->users)
+		hid_hw_close(hid);
+
+	return 0;
+}
+
+static int hidinput_uninhibit(struct input_dev *dev)
+{
+	struct hid_device *hid = input_get_drvdata(dev);
+
+	return dev->users ? hid_hw_open(hid) : 0;
 }
 
 static bool __hidinput_change_resolution_multipliers(struct hid_device *hid,
@@ -1737,6 +1759,8 @@ static struct hid_input *hidinput_allocate(struct hid_device *hid,
 	input_dev->event = hidinput_input_event;
 	input_dev->open = hidinput_open;
 	input_dev->close = hidinput_close;
+	input_dev->inhibit = hidinput_inhibit;
+	input_dev->uninhibit = hidinput_uninhibit;
 	input_dev->setkeycode = hidinput_setkeycode;
 	input_dev->getkeycode = hidinput_getkeycode;
 
