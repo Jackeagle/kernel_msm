@@ -175,6 +175,7 @@ static int wait_session_msg(struct venus_inst *inst)
 int hfi_session_create(struct venus_inst *inst, const struct hfi_inst_ops *ops)
 {
 	struct venus_core *core = inst->core;
+	int ret;
 
 	if (!ops)
 		return -EINVAL;
@@ -183,12 +184,22 @@ int hfi_session_create(struct venus_inst *inst, const struct hfi_inst_ops *ops)
 	init_completion(&inst->done);
 	inst->ops = ops;
 
-	mutex_lock(&core->lock);
-	list_add_tail(&inst->list, &core->instances);
-	atomic_inc(&core->insts_count);
+	ret = mutex_lock_interruptible(&core->lock);
+	if (ret)
+		return ret;
+
+	ret = atomic_read(&core->insts_count);
+	if (ret + 1 > core->max_sessions_supported) {
+		ret = -EAGAIN;
+	} else {
+		atomic_inc(&core->insts_count);
+		list_add_tail(&inst->list, &core->instances);
+		ret = 0;
+	}
+
 	mutex_unlock(&core->lock);
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL_GPL(hfi_session_create);
 
@@ -197,6 +208,18 @@ int hfi_session_init(struct venus_inst *inst, u32 pixfmt)
 	struct venus_core *core = inst->core;
 	const struct hfi_ops *ops = core->ops;
 	int ret;
+
+	/*
+	 * If core shutdown is in progress or if we are in system
+	 * recovery, return an error as during system error recovery
+	 * session_init() can't pass successfully
+	 */
+	mutex_lock(&core->lock);
+	if (!core->ops || core->sys_error) {
+		mutex_unlock(&core->lock);
+		return -EIO;
+	}
+	mutex_unlock(&core->lock);
 
 	if (inst->state != INST_UNINIT)
 		return -EINVAL;
