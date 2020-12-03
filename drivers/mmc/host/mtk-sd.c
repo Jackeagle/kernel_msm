@@ -2760,7 +2760,7 @@ static int msdc_runtime_resume(struct device *dev)
 	return 0;
 }
 
-static int msdc_suspend(struct device *dev)
+static int __maybe_unused msdc_suspend(struct device *dev)
 {
 	struct mmc_host *mmc = dev_get_drvdata(dev);
 	int ret;
@@ -2774,7 +2774,7 @@ static int msdc_suspend(struct device *dev)
 	return pm_runtime_force_suspend(dev);
 }
 
-static int msdc_resume(struct device *dev)
+static int __maybe_unused msdc_resume(struct device *dev)
 {
 	return pm_runtime_force_resume(dev);
 }
